@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>橋梁打音・周波数分析</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#e8effa;background:#0e1625}*{box-sizing:border-box}body{max-width:950px;margin:auto;padding:18px}h1{font-size:1.45rem;margin:8px 0}p{color:#abc1d7;line-height:1.5}.panel{background:#182338;border:1px solid #2d4260;border-radius:14px;padding:16px;margin:14px 0}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}button,.filelabel,select{background:#29415f;color:white;border:1px solid #52749a;border-radius:9px;padding:10px 13px;font-size:1rem}button:disabled{opacity:.45}button.primary{background:#127f7e}input[type=file]{display:none}canvas{display:block;width:100%;height:180px;background:#0b1422;border-radius:9px;touch-action:none;margin-top:12px}#spectrum{height:250px}.small{font-size:.87rem}.stats{font-variant-numeric:tabular-nums;color:#80e1ce}label{display:inline-flex;align-items:center;gap:5px}input[type=range]{max-width:130px}a{color:#8be3d1}#status{min-height:24px}.tablewrap{overflow:auto;max-height:400px}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{white-space:nowrap;text-align:right;border-bottom:1px solid #344964;padding:8px 10px}th:first-child,td:first-child{text-align:left}tr.selected{background:#254b61}tr{cursor:pointer}</style></head>
+<body><h1>橋梁打音・周波数分析</h1><p>iPhone・Android・Windowsのブラウザで打音を録音し、FFTスペクトルと打撃ごとの指標を確認します。音声データは端末内だけで処理します。</p>
+<div class="panel"><div class="row"><button id="record" class="primary">● 録音開始</button><button id="stop" disabled>■ 停止</button><button id="play" disabled>▶ 再生</button><button id="save" disabled>WAV保存</button><button id="audioRaw" disabled>打音の生データCSV</button><label class="filelabel">音声を読み込む<input id="file" type="file" accept="audio/*,.wav,.m4a,.mp3"></label></div><p id="status" role="status">準備完了。録音はHTTPSのページで開始してください。</p><div class="small stats" id="info">—</div><p class="small" id="compat"></p></div>
+<div class="panel"><strong>波形</strong><span class="small">　タップして分析位置を指定</span><canvas id="wave"></canvas><div class="row"><label>分析位置 <input id="position" type="range" min="0" max="1000" value="0"></label><span id="time" class="stats">0.00 s</span></div></div>
+<div class="panel"><div class="row"><strong>FFTスペクトル</strong><label>FFT点数 <select id="fft"><option>2048</option><option>4096</option><option selected>8192</option><option>16384</option></select></label><label>上限 <select id="limit"><option value="2000">2 kHz</option><option value="5000">5 kHz</option><option value="10000" selected>10 kHz</option><option value="20000">20 kHz</option></select></label><button id="audioSpec" disabled>打音の振幅スペクトルCSV</button></div><canvas id="spectrum"></canvas><p class="stats" id="peak">ピーク周波数：—</p><p class="small">振幅スペクトルCSVは波形で選んだ位置を中心とした1つのFFT窓です。表示値は録音振幅を基準とする相対値で、校正済み音圧ではありません。Hann窓を使用します。</p></div>
+<div class="panel"><h2>打撃ごとの比較</h2><div class="row"><label>検出感度 <select id="threshold"><option value="0.05">高</option><option value="0.12" selected>標準</option><option value="0.25">低</option></select></label><label>分析窓 <select id="hitWindow"><option value="40">40 ms</option><option value="80" selected>80 ms</option><option value="160">160 ms</option></select></label><button id="detect" disabled>打撃を検出・分析</button><button id="csv" disabled>指標をCSV保存</button></div><p class="small">表の打撃をタップすると波形上で位置を確認できます。「健全基準」にチェックした打撃の中央値と比較します。自動判定や不具合の確定は行いません。</p><div id="summary" class="stats">—</div><div class="tablewrap"><table><thead><tr><th>打撃</th><th>時刻</th><th>ピーク Hz</th><th>低域／高域</th><th>基準比</th><th>健全基準</th></tr></thead><tbody id="hits"></tbody></table></div><p class="small">低域／高域＝300–1000 Hzのスペクトルエネルギー ÷ 1000–5000 Hzのスペクトルエネルギー。端末・打撃位置・マイク距離・対象部材をそろえて比較してください。</p></div>
+<div class="panel"><h2>ハンマー入力と打音の周波数応答比</h2><p class="small">ハンマーのCSVは「時刻・力」の2列、または力だけの1列。時刻列と力列を指定します。打音波形では打撃の位置をタップしてください。</p><div class="row"><label class="filelabel">ハンマーCSVを読み込む<input id="hammerFile" type="file" accept=".csv,.txt,text/csv,text/plain"></label><label>形式 <select id="hammerFormat"><option value="s">時刻：秒</option><option value="ms">時刻：ミリ秒</option><option value="index">時刻：サンプル番号</option><option value="one">力のみ</option></select></label><label>時刻列 <input id="timeCol" type="number" min="1" value="1" style="width:4em"></label><label>力列 <input id="forceCol" type="number" min="1" value="2" style="width:4em"></label><label>Fs（番号／1列時） <input id="hammerRate" type="number" min="1" value="10000" style="width:6em"> Hz</label></div><p class="small stats" id="hammerInfo">ハンマーCSV：未読込</p><div class="row"><label>ハンマーFFT点数 <select id="hammerN"><option>1024</option><option>2048</option><option selected>4096</option><option>8192</option><option>16384</option></select></label><label>打撃 <select id="hammerHit"><option value="">CSV読込後に選択</option></select></label><button id="hammerRaw" disabled>ハンマーの生データCSV</button><button id="hammerSpec" disabled>ハンマーの振幅スペクトルCSV</button><button id="frfCalc" disabled>周波数応答比を計算</button><button id="frfCsv" disabled>結果CSV</button></div><p class="stats" id="frfInfo">—</p><canvas id="frfPlot"></canvas><p class="small">表示するのは |打音スペクトル|／|打撃力スペクトル| です。マイク未校正なら単位は録音振幅／力入力値であり、Pa/Nではありません。別デバイス収録では厳密な位相・コヒーレンスを算出しません。打撃力の小さい周波数は空欄にします。</p></div>
+<p class="small">研究・予備調査用。損傷の自動判定は行いません。打撃位置・ハンマー・マイク距離をそろえ、健全部と複数回比較してください。</p>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), wave=$('wave'),spec=$('spectrum');
+let ctx, stream, source, node, silent, chunks=[], recording=false, samples=null, sampleRate=0, playback=null, playbackStart=0, positionSec=0, anim=0, hitResults=[], workletReady=false, capturedCount=0;
+const status=s=>$('status').textContent=s;
+function canvasSize(c){const d=window.devicePixelRatio||1,w=Math.max(2,Math.round(c.clientWidth*d)),h=Math.max(2,Math.round(c.clientHeight*d));if(c.width!==w||c.height!==h){c.width=w;c.height=h}return [w,h]}
+function drawWave(){const [w,h]=canvasSize(wave),g=wave.getContext('2d');g.clearRect(0,0,w,h);g.strokeStyle='#36506c';g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.stroke();if(!samples?.length)return;g.strokeStyle='#75d9d1';g.beginPath();for(let x=0;x<w;x++){let a=Math.floor(x*samples.length/w),b=Math.max(a+1,Math.floor((x+1)*samples.length/w)),step=Math.max(1,Math.floor((b-a)/80)),lo=1,hi=-1;for(let k=a;k<b;k+=step){let v=samples[k];if(v<lo)lo=v;if(v>hi)hi=v}g.moveTo(x,h/2-hi*h*.44);g.lineTo(x,h/2-lo*h*.44)}g.stroke();g.strokeStyle='#ffbc72';let x=positionSec*sampleRate/samples.length*w;g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke()}
+function fftPower(input){let n=input.length,re=new Float64Array(n),im=new Float64Array(n);for(let i=0;i<n;i++)re[i]=input[i]*(.5-.5*Math.cos(2*Math.PI*i/(n-1)));for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){let t=re[i];re[i]=re[j];re[j]=t}}for(let len=2;len<=n;len<<=1){let theta=-2*Math.PI/len,c=Math.cos(theta),s=Math.sin(theta);for(let i=0;i<n;i+=len){let wr=1,wi=0;for(let j=0;j<len/2;j++){let a=i+j,b=a+len/2,vr=re[b]*wr-im[b]*wi,vi=re[b]*wi+im[b]*wr;re[b]=re[a]-vr;im[b]=im[a]-vi;re[a]+=vr;im[a]+=vi;let nw=wr*c-wi*s;wi=wr*s+wi*c;wr=nw}}}let out=new Float32Array(n/2);for(let i=0;i<out.length;i++)out[i]=Math.hypot(re[i],im[i]);return out}
+function drawSpectrum(power,sr,n){let [w,h]=canvasSize(spec),g=spec.getContext('2d');g.clearRect(0,0,w,h);g.fillStyle='#9eb1c7';g.font=`${Math.max(11,Math.round(h/21))}px system-ui`;let l=43,r=12,t=12,b=27,ww=w-l-r,hh=h-t-b,maxHz=Math.min(+$('limit').value,sr/2),maxBin=Math.min(power.length-1,Math.floor(maxHz*n/sr));for(let db=-90;db<=0;db+=30){let y=t+(-db/90)*hh;g.strokeStyle='#29415b';g.beginPath();g.moveTo(l,y);g.lineTo(w-r,y);g.stroke();g.fillText(db+'',4,y+4)}for(let hz=0;hz<=maxHz;hz+=maxHz/4){let x=l+hz/maxHz*ww;g.strokeStyle='#29415b';g.beginPath();g.moveTo(x,t);g.lineTo(x,h-b);g.stroke();g.fillText(Math.round(hz/1000)+'k',x-7,h-7)}let peak=0,peakBin=0;g.strokeStyle='#72e0cd';g.lineWidth=Math.max(1,w/600);g.beginPath();for(let i=1;i<=maxBin;i++){let hz=i*sr/n,db=20*Math.log10(Math.max(1e-9,power[i]/(n*.25))),x=l+hz/maxHz*ww,y=t+Math.min(1,Math.max(0,-db/90))*hh;if(i===1)g.moveTo(x,y);else g.lineTo(x,y);if(power[i]>peak){peak=power[i];peakBin=i}}g.stroke();$('peak').textContent=peakBin?`ピーク周波数：約 ${(peakBin*sr/n).toFixed(1)} Hz（周波数刻み ${(sr/n).toFixed(1)} Hz）`:'ピーク周波数：—'}
+function analyze(){if(!samples?.length)return;let n=+$('fft').value,arr=new Float32Array(n),center=Math.round(positionSec*sampleRate),start=center-Math.floor(n/2);for(let i=0;i<n;i++){let idx=start+i;if(idx>=0&&idx<samples.length)arr[i]=samples[idx]}drawSpectrum(fftPower(arr),sampleRate,n);drawWave();$('time').textContent=positionSec.toFixed(2)+' s'}
+function setPosition(sec){positionSec=Math.max(0,Math.min(samples?.length/sampleRate||0,sec));$('position').value=samples?.length?Math.round(positionSec*sampleRate/samples.length*1000):0;analyze()}
+function setSamples(data,sr){samples=data;sampleRate=sr;positionSec=0;hitResults=[];renderHits();$('detect').disabled=false;$('play').disabled=false;$('save').disabled=false;$('audioRaw').disabled=false;$('audioSpec').disabled=false;frfResult=null;$('frfCsv').disabled=true;$('frfInfo').textContent='—';$('info').textContent=`${(data.length/sr).toFixed(2)} s · ${sr} Hz · モノラル`;setPosition(Math.min(data.length/sr,(+$('fft').value/2)/sr))}
+function makeWav(data,sr){let ab=new ArrayBuffer(44+data.length*2),v=new DataView(ab),str=(i,s)=>{for(let j=0;j<s.length;j++)v.setUint8(i+j,s.charCodeAt(j))};str(0,'RIFF');v.setUint32(4,36+data.length*2,true);str(8,'WAVE');str(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);str(36,'data');v.setUint32(40,data.length*2,true);for(let i=0;i<data.length;i++){let x=Math.max(-1,Math.min(1,data[i]));v.setInt16(44+i*2,x<0?x*32768:x*32767,true)}return new Blob([ab],{type:'audio/wav'})}
+async function setup(){ctx??=new (window.AudioContext||window.webkitAudioContext)();await ctx.resume()}
+async function stopRecording(){
+  if(!recording)return;
+  recording=false;cancelAnimationFrame(anim);$('stop').disabled=true;
+  if(node.port){
+    node.port.postMessage('flush');
+    await new Promise(resolve=>{let timer=setTimeout(resolve,350);node.port.onmessage=e=>{
+      if(e.data instanceof Float32Array){chunks.push(e.data);capturedCount+=e.data.length}
+      if(e.data==='flushed'){clearTimeout(timer);resolve()}
+    }})
+  }else node.onaudioprocess=null;
+  node.disconnect();source.disconnect();silent.disconnect();stream.getTracks().forEach(t=>t.stop());
+  let len=chunks.reduce((a,c)=>a+c.length,0),all=new Float32Array(len),p=0;
+  for(let c of chunks){all.set(c,p);p+=c.length}chunks=[];
+  if(len){setSamples(all,ctx.sampleRate);status('録音しました。波形をタップすると、その時刻のFFTを表示します。')}
+  else status('音声が記録されませんでした。');
+  $('record').disabled=false
+}
+const workletCode=`class PcmCapture extends AudioWorkletProcessor {
+ constructor(){super();this.buf=new Float32Array(4096);this.used=0;this.port.onmessage=e=>{if(e.data==='flush'){this.send();this.port.postMessage('flushed')}}}
+ send(){if(this.used){this.port.postMessage(this.buf.slice(0,this.used));this.used=0}}
+ process(inputs){let a=inputs[0]?.[0];if(a)for(let v of a){this.buf[this.used++]=v;if(this.used===this.buf.length)this.send()}return true}
+}registerProcessor('pcm-capture',PcmCapture);`;
+async function makeRecorder(){
+  source=ctx.createMediaStreamSource(stream);silent=ctx.createGain();silent.gain.value=0;
+  chunks=[];capturedCount=0;
+  let useWorklet=location.protocol!=='file:'&&!!window.AudioWorkletNode&&!!ctx.audioWorklet;
+  if(useWorklet){
+    try{
+      if(!workletReady){let url=URL.createObjectURL(new Blob([workletCode],{type:'text/javascript'}));
+        try{await ctx.audioWorklet.addModule(url);workletReady=true}finally{URL.revokeObjectURL(url)}}
+      node=new AudioWorkletNode(ctx,'pcm-capture');
+      node.port.onmessage=e=>{if(e.data instanceof Float32Array){chunks.push(e.data);capturedCount+=e.data.length}}
+    }catch(e){node=null;useWorklet=false}
+  }
+  if(!useWorklet){
+    if(!ctx.createScriptProcessor)throw new Error('このブラウザでは録音処理が利用できません。HTTPSで開いてください。');
+    node=ctx.createScriptProcessor(4096,1,1);
+    node.onaudioprocess=e=>{let data=e.inputBuffer.getChannelData(0).slice();chunks.push(data);capturedCount+=data.length}
+  }
+  source.connect(node).connect(silent).connect(ctx.destination);
+  return useWorklet
+}
+$('record').onclick=async()=>{
+  if(!navigator.mediaDevices?.getUserMedia){status('マイクを利用できません。HTTPSまたはlocalhostで開き、ブラウザの設定を確認してください。');return}
+  try{
+    $('record').disabled=true;await setup();
+    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    let worklet=await makeRecorder();recording=true;$('stop').disabled=false;$('play').disabled=true;
+    status(worklet?'録音中…':'録音中…（ローカルファイル用の互換方式）');
+    const tick=()=>{if(!recording)return;$('info').textContent=`録音中 · 約 ${(capturedCount/ctx.sampleRate).toFixed(1)} s · ${ctx.sampleRate} Hz`;anim=requestAnimationFrame(tick)};tick()
+  }catch(e){node?.disconnect();source?.disconnect();silent?.disconnect();stream?.getTracks().forEach(t=>t.stop());$('record').disabled=false;status('録音を開始できません: '+e.message)}
+};
+$('stop').onclick=stopRecording;
+$('file').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{await setup();let b=await ctx.decodeAudioData(await f.arrayBuffer()),data=new Float32Array(b.length);for(let ch=0;ch<b.numberOfChannels;ch++){let a=b.getChannelData(ch);for(let i=0;i<a.length;i++)data[i]+=a[i]/b.numberOfChannels}setSamples(data,b.sampleRate);status(`読み込みました: ${f.name}`)}catch(err){status('読み込めませんでした: '+err.message)}e.target.value=''};
+$('save').onclick=()=>{if(!samples)return;let u=URL.createObjectURL(makeWav(samples,sampleRate)),a=document.createElement('a');a.href=u;a.download='bridge-sound-'+new Date().toISOString().replace(/[:.]/g,'-')+'.wav';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),60000);status('WAVの保存を開始しました。ブラウザのダウンロード先を確認してください。')};
+$('play').onclick=async()=>{if(!samples)return;await setup();if(playback){playback.stop();playback=null;$('play').textContent='▶ 再生';return}let buffer=ctx.createBuffer(1,samples.length,sampleRate);buffer.copyToChannel(samples,0);playback=ctx.createBufferSource();playback.buffer=buffer;playback.connect(ctx.destination);let from=Math.min(positionSec,Math.max(0,samples.length/sampleRate-.001));playbackStart=ctx.currentTime-from;playback.onended=()=>{playback=null;$('play').textContent='▶ 再生'};playback.start(0,from);$('play').textContent='■ 再生停止';let follow=()=>{if(!playback)return;setPosition(ctx.currentTime-playbackStart);requestAnimationFrame(follow)};follow()};
+$('position').oninput=e=>setPosition((+e.target.value)/1000*(samples?.length/sampleRate||0));wave.onpointerdown=e=>{if(samples)setPosition((e.clientX-wave.getBoundingClientRect().left)/wave.clientWidth*samples.length/sampleRate)};$('fft').onchange=analyze;$('limit').onchange=()=>{analyze();drawFrf()};window.onresize=()=>{drawWave();if(samples)analyze();drawFrf()};drawWave();
+function median(a){if(!a.length)return NaN;let b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2}
+function findHits(data,sr,sensitivity=.12){let step=Math.max(1,Math.round(sr*.002)),count=Math.ceil(data.length/step),env=new Float32Array(count);for(let b=0;b<count;b++){let sum=0,end=Math.min(data.length,(b+1)*step);for(let i=b*step;i<end;i++)sum+=data[i]*data[i];env[b]=Math.sqrt(sum/(end-b*step))}let max=0;for(let v of env)max=Math.max(max,v);if(max<.001)return[];let floor=median(env),cut=Math.max(max*sensitivity,floor*5),space=Math.ceil(.14*sr/step),found=[];for(let b=1;b<count;b++){if(env[b]>=cut&&env[b-1]<cut){found.push(b*step);b+=space-1;if(found.length>=200)break}}return found}
+function hitFeatures(at,sr,ms,n){let length=Math.min(Math.round(sr*ms/1000),n),arr=new Float32Array(n),start=Math.max(0,at-Math.round(sr*.003)),off=Math.floor((n-length)/2);for(let i=0;i<length&&start+i<samples.length;i++){let taper=.5-.5*Math.cos(2*Math.PI*i/Math.max(1,length-1));arr[off+i]=samples[start+i]*taper}let power=fftPower(arr),low=0,high=0,peak=0,peakBin=0;for(let i=1;i<power.length;i++){let hz=i*sr/n,v=power[i]**2;if(hz>=300&&hz<1000)low+=v;if(hz>=1000&&hz<5000)high+=v;if(hz>=100&&hz<=5000&&v>peak){peak=v;peakBin=i}}return{peakHz:peakBin*sr/n,ratio:high>0?low/high:NaN}}
+async function detectHits(){if(!samples)return;$('detect').disabled=true;status('打撃を分析中…');await new Promise(requestAnimationFrame);try{let ms=+$('hitWindow').value,need=Math.ceil(sampleRate*ms/1000),n=+$('fft').value;while(n<need)n*=2;let found=findHits(samples,sampleRate,+$('threshold').value);hitResults=[];for(let i=0;i<found.length;i++){let at=found[i],features=hitFeatures(at,sampleRate,ms,n);hitResults.push({number:i+1,time:at/sampleRate,...features,reference:false});if(i%10===9)await new Promise(requestAnimationFrame)}renderHits();status(found.length?`${found.length}打撃を検出しました。健全部の行にチェックして比較できます。`:'打撃を検出できませんでした。感度や録音条件を確認してください。')}catch(e){status('分析に失敗しました: '+e.message)}$('detect').disabled=false}
+function renderHits(){let refs=hitResults.filter(h=>h.reference),base=median(refs.map(h=>h.ratio).filter(Number.isFinite));$('summary').textContent=hitResults.length?`${hitResults.length}打撃 · 健全基準 ${refs.length}打撃${Number.isFinite(base)?` · 基準の低域／高域 中央値 ${base.toFixed(3)}`:''}`:'—';$('csv').disabled=!hitResults.length;let body=$('hits');body.replaceChildren();for(let h of hitResults){let tr=document.createElement('tr');if(Math.abs(positionSec-h.time)<.015)tr.className='selected';let cells=[h.number,h.time.toFixed(3)+' s',h.peakHz.toFixed(1),Number.isFinite(h.ratio)?h.ratio.toFixed(3):'—',Number.isFinite(base)&&base>0&&Number.isFinite(h.ratio)?(h.ratio/base).toFixed(2)+' ×':'—'];for(let value of cells){let td=document.createElement('td');td.textContent=value;tr.append(td)}let td=document.createElement('td'),check=document.createElement('input');check.type='checkbox';check.checked=h.reference;check.setAttribute('aria-label',`${h.number}打撃を健全基準にする`);check.onchange=()=>{h.reference=check.checked;renderHits()};td.append(check);tr.append(td);tr.onclick=e=>{if(e.target!==check)setPosition(h.time)};body.append(tr)}}
+function saveCsv(){if(!hitResults.length)return;let refs=hitResults.filter(h=>h.reference),base=median(refs.map(h=>h.ratio).filter(Number.isFinite)),rows=['hit,time_s,peak_hz,energy_300_1000_over_1000_5000,ratio_to_reference_median,reference'];for(let h of hitResults)rows.push([h.number,h.time.toFixed(6),h.peakHz.toFixed(3),Number.isFinite(h.ratio)?h.ratio.toFixed(6):'',Number.isFinite(base)&&base>0&&Number.isFinite(h.ratio)?(h.ratio/base).toFixed(6):'',h.reference?1:0].join(','));let u=URL.createObjectURL(new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=u;a.download='bridge-hit-features.csv';a.click();setTimeout(()=>URL.revokeObjectURL(u),60000)}
+$('detect').onclick=detectHits;$('csv').onclick=saveCsv;$('threshold').onchange=()=>{if(hitResults.length)status('感度を変更しました。「打撃を検出・分析」で再計算してください。')};$('hitWindow').onchange=$('threshold').onchange;
+
+let hammer=null, frfResult=null;
+function downloadBlob(blob,name){let url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000)}
+async function rawCsv(data,rate,name,field,times=null){
+  const parts=[`sample_index,time_s,${field}\r\n`];
+  for(let i=0;i<data.length;i+=5000){let lines=[];for(let j=i;j<Math.min(i+5000,data.length);j++)lines.push(`${j},${(times?times[j]:j/rate).toFixed(8)},${data[j]}\r\n`);parts.push(lines.join(''));if(i%100000===0){status(`CSVを作成中: ${Math.round(100*i/data.length)}%`);await new Promise(requestAnimationFrame)}}
+  downloadBlob(new Blob(parts,{type:'text/csv;charset=utf-8'}),name);status(`${name} の保存を開始しました`)
+}
+function spectrumCsv(name,spec,rate,n,center){let sum=(n-1)/2,lines=['frequency_hz,amplitude,amplitude_db,fs_hz,fft_points,df_hz,center_s'];for(let k=0;k<spec.length;k++){let a=spec[k]*(k===0?1:2)/sum;lines.push(`${(k*rate/n).toFixed(6)},${a.toExponential(9)},${(20*Math.log10(Math.max(a,1e-12))).toFixed(4)},${rate},${n},${(rate/n).toFixed(9)},${center.toFixed(6)}`)}downloadBlob(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),name);status(`${name} の保存を開始しました`)}
+function audioAtMarker(){let n=+$('fft').value,arr=new Float32Array(n),start=Math.round(positionSec*sampleRate)-n/2;for(let i=0;i<n;i++){let j=start+i;if(j>=0&&j<samples.length)arr[i]=samples[j]}return {spectrum:fftPower(arr),n}}
+$('audioRaw').onclick=()=>{if(samples)rawCsv(samples,sampleRate,'audio_raw.csv','amplitude')};
+$('audioSpec').onclick=()=>{if(samples){let v=audioAtMarker();spectrumCsv('audio_amplitude_spectrum.csv',v.spectrum,sampleRate,v.n,positionSec)}};
+function delimiterOf(line){let chars=[',','\t',';'];return chars.sort((a,b)=>line.split(b).length-line.split(a).length)[0]}
+function parseHammerCsv(content,format,timeColumn,forceColumn,indexRate){
+  let lines=content.replace(/^\ufeff/,'').split(/\r?\n/).filter(x=>x.trim()&& !x.trim().startsWith('#'));
+  if(!lines.length)throw Error('CSVが空です');let delim=delimiterOf(lines.find(x=>x.includes(',')||x.includes('\t')||x.includes(';'))||lines[0]);
+  let times=[],values=[];
+  for(let line of lines){let fields=line.split(delim).map(x=>x.trim().replace(/^"|"$/g,''));let raw=Number(fields[forceColumn-1]);if(!fields[forceColumn-1]||!Number.isFinite(raw))continue;
+    let t=format==='one'?values.length/indexRate:Number(fields[timeColumn-1]);
+    if(format!=='one'&&(!fields[timeColumn-1]||!Number.isFinite(t)))continue;
+    if(format==='ms')t/=1000;else if(format==='index')t/=indexRate;
+    times.push(t);values.push(raw)
+  }
+  if(values.length<8)throw Error('有効な数値が8行未満です。列番号・形式を確認してください');
+  let rate=indexRate;
+  if(format==='s'||format==='ms'){
+    let diffs=[];for(let i=1;i<times.length;i++){let d=times[i]-times[i-1];if(d<=0)throw Error('時刻列は昇順で重複がないようにしてください');if(i<=2000)diffs.push(d)}
+    let dt=median(diffs);rate=1/dt;
+    let irregular=diffs.filter(d=>Math.abs(d/dt-1)>.03).length/diffs.length;
+    if(irregular>.01)throw Error('時刻間隔が一定ではありません。等間隔に補間したCSVを読み込んでください')
+  }
+  if(!(rate>0&&rate<1e7))throw Error('ハンマーのサンプリング周波数を確認してください');
+  return {samples:Float32Array.from(values),times:Float64Array.from(times),rate,firstTime:times[0],name:'',format}
+}
+function hammerPeaks(data,rate){let max=0;for(let v of data)max=Math.max(max,Math.abs(v));if(!max)return[];let threshold=max*.18,space=Math.round(rate*.12),peaks=[];
+  for(let i=1;i<data.length-1;i++){let v=Math.abs(data[i]);if(v>=threshold&&v>=Math.abs(data[i-1])&&v>=Math.abs(data[i+1])){let best=i,end=Math.min(i+space,data.length-1);for(let j=i+1;j<end;j++)if(Math.abs(data[j])>Math.abs(data[best]))best=j;peaks.push(best);i=end-1;if(peaks.length>=100)break}}
+  return peaks
+}
+$('hammerFile').onchange=async e=>{let file=e.target.files[0];if(!file)return;try{
+  let bytes=await file.arrayBuffer(),txt=new TextDecoder('utf-8').decode(bytes);if(txt.includes('\ufffd'))txt=new TextDecoder('shift_jis').decode(bytes);
+  let format=$('hammerFormat').value,tc=+$('timeCol').value,fc=+$('forceCol').value,fs=+$('hammerRate').value;
+  hammer=parseHammerCsv(txt,format,tc,fc,fs);hammer.name=file.name;hammer.peaks=hammerPeaks(hammer.samples,hammer.rate);frfResult=null;$('frfCsv').disabled=true;
+  let selector=$('hammerHit');selector.replaceChildren();for(let [i,k] of hammer.peaks.entries()){let o=document.createElement('option');o.value=k;o.textContent=`${i+1}打目（${hammer.times[k].toFixed(3)} s）`;selector.append(o)}
+  if(!hammer.peaks.length){let o=document.createElement('option');o.value=0;o.textContent='ピーク未検出：0秒';selector.append(o)}
+  $('hammerRaw').disabled=$('hammerSpec').disabled=$('frfCalc').disabled=false;
+  $('hammerInfo').textContent=`${file.name} · ${hammer.samples.length}点 · Fs=${hammer.rate.toFixed(3)} Hz · ${hammer.peaks.length}打撃候補`;
+  status('ハンマーCSVを読み込みました。打音の波形で対応する打撃位置を選択してください。')
+ }catch(err){hammer=null;$('hammerRaw').disabled=$('hammerSpec').disabled=$('frfCalc').disabled=true;status('ハンマーCSVを読み込めません: '+err.message)}e.target.value=''};
+$('hammerRaw').onclick=()=>{if(hammer)rawCsv(hammer.samples,hammer.rate,'hammer_raw.csv','force_input',hammer.times)};
+function fftRadix(re,im,inverse=false){let n=re.length;for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){let v=re[i];re[i]=re[j];re[j]=v;v=im[i];im[i]=im[j];im[j]=v}}
+ for(let len=2;len<=n;len<<=1){let angle=(inverse?2:-2)*Math.PI/len,c=Math.cos(angle),s=Math.sin(angle);for(let i=0;i<n;i+=len){let wr=1,wi=0;for(let j=0;j<len/2;j++){let a=i+j,b=a+len/2,vr=re[b]*wr-im[b]*wi,vi=re[b]*wi+im[b]*wr;re[b]=re[a]-vr;im[b]=im[a]-vi;re[a]+=vr;im[a]+=vi;let nw=wr*c-wi*s;wi=wr*s+wi*c;wr=nw}}}if(inverse)for(let i=0;i<n;i++){re[i]/=n;im[i]/=n}}
+function windowed(data,start,n){let re=new Float64Array(n),im=new Float64Array(n);for(let i=0;i<n;i++){let j=start+i;if(j>=0&&j<data.length)re[i]=data[j]*(.5-.5*Math.cos(2*Math.PI*i/(n-1)))}return{re,im}}
+function hammerTransform(){if(!hammer)throw Error('ハンマーCSVを読み込んでください');let n=+$('hammerN').value,at=+$('hammerHit').value||0,start=Math.round(at-n*.2),v=windowed(hammer.samples,start,n);fftRadix(v.re,v.im);return{...v,n,df:hammer.rate/n,at,start}}
+$('hammerSpec').onclick=()=>{try{let h=hammerTransform(),power=new Float32Array(h.n/2+1);for(let i=0;i<power.length;i++)power[i]=Math.hypot(h.re[i],h.im[i]);spectrumCsv('hammer_amplitude_spectrum.csv',power,hammer.rate,h.n,hammer.times[h.at])}catch(e){status(e.message)}};
+// Chirp-Z transform: evaluates the audio's complex spectrum exactly at k*hammer_df.
+// Its convolution is calculated with a power-of-two FFT, even when the audio window length differs.
+function audioOnHammerGrid(data,rate,start,L,df,K){let size=1;while(size<L+K-1)size*=2;if(size>524288)throw Error('分析窓が長すぎます。ハンマーFFT点数を小さくしてください');
+ let ar=new Float64Array(size),ai=new Float64Array(size),br=new Float64Array(size),bi=new Float64Array(size),theta=2*Math.PI*df/rate;
+ for(let t=0;t<L;t++){let j=start+t,x=j>=0&&j<data.length?data[j]:0,w=.5-.5*Math.cos(2*Math.PI*t/(L-1)),phi=-theta*t*t/2;ar[t]=x*w*Math.cos(phi);ai[t]=x*w*Math.sin(phi)}
+ for(let r=0;r<K;r++){let phi=theta*r*r/2;br[r]=Math.cos(phi);bi[r]=Math.sin(phi)}
+ for(let r=1;r<L;r++){let phi=theta*r*r/2;br[size-r]=Math.cos(phi);bi[size-r]=Math.sin(phi)}
+ fftRadix(ar,ai);fftRadix(br,bi);for(let i=0;i<size;i++){let rr=ar[i]*br[i]-ai[i]*bi[i],ii=ar[i]*bi[i]+ai[i]*br[i];ar[i]=rr;ai[i]=ii}fftRadix(ar,ai,true);
+ let out=new Float64Array(K);for(let k=0;k<K;k++){let phi=-theta*k*k/2;out[k]=Math.hypot(ar[k]*Math.cos(phi)-ai[k]*Math.sin(phi),ar[k]*Math.sin(phi)+ai[k]*Math.cos(phi))}return out
+}
+function drawFrf(){let c=$('frfPlot'),[w,h]=canvasSize(c),g=c.getContext('2d');g.clearRect(0,0,w,h);if(!frfResult)return;let maxF=Math.min(+$('limit').value,frfResult.maxHz),l=48,r=14,t=12,b=30,ww=w-l-r,hh=h-t-b,valid=frfResult.rows.filter(x=>x.f<=maxF&&Number.isFinite(x.h)&&x.h>0),logs=valid.map(x=>Math.log10(x.h));if(!logs.length)return;let low=Math.floor(Math.min(...logs)),high=Math.ceil(Math.max(...logs));if(low===high)high=low+1;g.fillStyle='#a8bed4';g.font='12px system-ui';g.strokeStyle='#2d4561';for(let i=0;i<=4;i++){let x=l+i*ww/4;g.beginPath();g.moveTo(x,t);g.lineTo(x,h-b);g.stroke();g.fillText((maxF*i/4000).toFixed(1)+'k',x-12,h-8)}for(let q=low;q<=high;q++){let y=t+(high-q)/(high-low)*hh;g.beginPath();g.moveTo(l,y);g.lineTo(w-r,y);g.stroke();g.fillText(`1e${q}`,3,y+4)}g.strokeStyle='#f5bd75';g.lineWidth=1.5;g.beginPath();let started=false;for(let v of valid){let x=l+v.f/maxF*ww,y=t+(high-Math.log10(v.h))/(high-low)*hh;if(!started){g.moveTo(x,y);started=true}else g.lineTo(x,y)}g.stroke()}
+async function calcFrf(){if(!hammer||!samples){status('打音とハンマーCSVの両方を読み込んでください');return}$('frfCalc').disabled=true;status('共通の周波数列で分析中…');await new Promise(requestAnimationFrame);try{
+ let v=hammerTransform(),audioN=Math.round(sampleRate/v.df);if(audioN<8||audioN>131072)throw Error(`打音FFT相当点数 ${audioN} は範囲外です。ハンマーFFT点数を変更してください`);
+ let start=Math.round(positionSec*sampleRate-audioN*.2),K=Math.min(v.n/2+1,Math.floor(sampleRate/2/v.df)+1);
+ let audioMag=audioOnHammerGrid(samples,sampleRate,start,audioN,v.df,K),forceAmp=new Float64Array(K),audioAmp=new Float64Array(K),maxForce=0;
+ for(let k=0;k<K;k++){let side=k===0?1:2;forceAmp[k]=Math.hypot(v.re[k],v.im[k])*side/((v.n-1)/2);audioAmp[k]=audioMag[k]*side/((audioN-1)/2);maxForce=Math.max(maxForce,forceAmp[k])}
+ let rows=[];for(let k=0;k<K;k++){let f=k*v.df,F=forceAmp[k],A=audioAmp[k],ratio=k>0&&F>=maxForce*.01?A/F:NaN;rows.push({f,F,A,h:ratio})}
+ frfResult={rows,df:v.df,forceN:v.n,audioN,audioNativeDf:sampleRate/audioN,forceRate:hammer.rate,audioRate:sampleRate,hammerTime:hammer.times[v.at],audioTime:positionSec,maxHz:(K-1)*v.df};
+ $('frfCsv').disabled=false;$('frfInfo').textContent=`df=${v.df.toFixed(6)} Hz（共通） · ハンマー ${v.n}点 / ${hammer.rate.toFixed(1)} Hz · 打音 ${audioN}点 / ${sampleRate} Hz · 打音側の通常FFTでは df=${(sampleRate/audioN).toFixed(6)} Hz。共通周波数列はChirp-Z変換で正確に評価。`;
+ drawFrf();status('周波数応答比を計算しました。画面の音声位置とハンマー打撃番号を確認してください。')
+ }catch(e){status('周波数応答比を計算できません: '+e.message)}$('frfCalc').disabled=false}
+$('frfCalc').onclick=calcFrf;
+$('frfCsv').onclick=()=>{if(!frfResult)return;let r=frfResult,lines=['frequency_hz,hammer_amplitude,audio_amplitude,frf_magnitude,df_hz,hammer_fft_points,audio_samples,hammer_fs_hz,audio_fs_hz,hammer_hit_s,audio_mark_s'];for(let q of r.rows)lines.push(`${q.f.toFixed(8)},${q.F.toExponential(9)},${q.A.toExponential(9)},${Number.isFinite(q.h)?q.h.toExponential(9):''},${r.df.toFixed(9)},${r.forceN},${r.audioN},${r.forceRate.toFixed(6)},${r.audioRate},${r.hammerTime.toFixed(6)},${r.audioTime.toFixed(6)}`);downloadBlob(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}),'audio_over_hammer_frequency_response.csv')};
+$('hammerN').onchange=()=>{frfResult=null;$('frfCsv').disabled=true;$('frfInfo').textContent='ハンマーFFT点数を変更しました。再計算してください。'};
+$('hammerHit').onchange=$('hammerN').onchange;
+$('hammerFormat').onchange=()=>{$('forceCol').value=$('hammerFormat').value==='one'?1:2};
+const compatible=!!(window.AudioContext||window.webkitAudioContext)&&!!navigator.mediaDevices?.getUserMedia;
+$('compat').textContent=compatible?(location.protocol==='file:'?'ローカルファイルの互換方式で録音します。マイクを許可してください。':'録音機能を利用できます。マイクの許可が必要です。'):'録音機能を利用できません。HTTPSで開き、ブラウザの更新とマイク許可を確認してください。音声ファイルの読み込みは試せます。';
+if(!compatible)$('record').disabled=true;
+</script></body></html>
